@@ -41,10 +41,10 @@ try:
             f'RECEIVED | '
             f'partition={msg.partition()} '
             f'offset={msg.offset():<5} | '
-            f'{event["sensor_id"]:<20} '
-            f'{event["city"]:<12} '
-            f'{event["sensor_type"]:<12} '
-            f'value={event["value"]}'
+            f'{event.get("sensor_id", "MISSING"):<20} '
+            f'{event.get("city", "UNKNOWN"):<12} '
+            f'{event.get("sensor_type", "UNKNOWN"):<12} '
+            f'value={event.get("value", "MISSING")}'
         )
 
 except KeyboardInterrupt:
