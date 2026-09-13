@@ -146,38 +146,25 @@ try:
         sensor = random.choice(sensors)
 
         event = create_event(sensor)
+        condition = "NORMAL"
 
-        condition = "normal"
-
-        # Malformed event
         if should_generate(MALFORMED_EVENT_RATE):
-
             event = make_malformed_event(event)
             condition = "MALFORMED"
 
-
-        # Late event
         elif should_generate(LATE_EVENT_RATE):
-
             event = make_late_event(
                 event,
                 MAX_EVENT_DELAY_SECONDS,
             )
-
             condition = "LATE"
-
 
         publish_event(event)
 
-
-        # Duplicate is published twice
         if should_generate(DUPLICATE_EVENT_RATE):
-
             duplicate = make_duplicate(event)
-
             publish_event(duplicate)
-
-            condition = "DUPLICATE"
+            condition = f"{condition}+DUPLICATE"
 
         producer.poll(0)
 
