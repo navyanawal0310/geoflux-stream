@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+import requests
+import socket
 from database import query
 
 
@@ -207,3 +208,92 @@ def live_incidents():
         LIMIT 100
         """
     )
+@app.get("/api/system/health")
+def system_health():
+
+    services = {
+        "api": {
+            "status": "UP"
+        }
+    }
+
+    # ClickHouse
+    try:
+        result = query(
+            "SELECT 1 AS status"
+        )
+
+        services["clickhouse"] = {
+            "status": "UP"
+            if result[0]["status"] == 1
+            else "DOWN"
+        }
+
+    except Exception as exc:
+        services["clickhouse"] = {
+            "status": "DOWN",
+            "error": str(exc)
+        }
+
+
+    # Flink
+    try:
+        response = requests.get(
+            "http://localhost:8081/overview",
+            timeout=2
+        )
+
+        data = response.json()
+
+        services["flink"] = {
+            "status": "UP",
+            "taskmanagers":
+                data.get(
+                    "taskmanagers",
+                    0
+                ),
+            "slots_total":
+                data.get(
+                    "slots-total",
+                    0
+                ),
+            "slots_available":
+                data.get(
+                    "slots-available",
+                    0
+                ),
+            "jobs_running":
+                data.get(
+                    "jobs-running",
+                    0
+                )
+        }
+
+    except Exception as exc:
+        services["flink"] = {
+            "status": "DOWN",
+            "error": str(exc)
+        }
+
+
+    # Kafka TCP connectivity
+    try:
+        connection = socket.create_connection(
+            ("localhost", 9092),
+            timeout=2
+        )
+
+        connection.close()
+
+        services["kafka"] = {
+            "status": "UP"
+        }
+
+    except Exception as exc:
+        services["kafka"] = {
+            "status": "DOWN",
+            "error": str(exc)
+        }
+
+
+    return services

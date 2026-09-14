@@ -4,25 +4,20 @@
   let mapContainer: HTMLDivElement;
 
   onMount(() => {
-    let map: any;
+    let map: any = null;
     let refreshTimer: number | undefined;
     let destroyed = false;
 
     async function startMap() {
       const maplibregl = await import('maplibre-gl');
 
-      if (destroyed) return;
+      if (destroyed) {
+        return;
+      }
 
       map = new maplibregl.Map({
         container: mapContainer,
 
-        /*
-         * No external style JSON.
-         * No CARTO key.
-         *
-         * We use standard OpenStreetMap raster tiles
-         * directly as a MapLibre source.
-         */
         style: {
           version: 8,
 
@@ -47,10 +42,6 @@
               type: 'raster',
               source: 'osm',
 
-              /*
-               * Slightly suppress the basemap so
-               * incident intelligence dominates.
-               */
               paint: {
                 'raster-saturation': -0.65,
                 'raster-contrast': 0.15,
@@ -61,14 +52,13 @@
         },
 
         center: [20, 18],
-
         zoom: 1.35,
-
         minZoom: 1,
 
         attributionControl: true
       });
 
+      (window as any).__geofluxMap = map;
 
       map.addControl(
         new maplibregl.NavigationControl({
@@ -78,379 +68,80 @@
       );
 
 
-      map.on('load', () => {
-        console.log(
-          'GEOFlux geographic basemap loaded'
-        );
-
-
-        /*
-         * One GeoJSON source represents every
-         * active city.
-         */
-        map.addSource(
-          'geoflux-incidents',
-          {
-            type: 'geojson',
-
-            data: {
-              type: 'FeatureCollection',
-              features: []
-            }
-          }
-        );
-
-
-        /*
-         * Outer glow.
-         */
-        map.addLayer({
-          id: 'incident-glow',
-
-          type: 'circle',
-
-          source: 'geoflux-incidents',
-
-          paint: {
-            'circle-radius': [
-              'interpolate',
-              ['linear'],
-              ['get', 'incident_count'],
-
-              0, 9,
-              25, 13,
-              100, 19,
-              500, 27
-            ],
-
-            'circle-color': [
-              'match',
-              ['get', 'latest_severity'],
-
-              'CRITICAL',
-              '#ef4444',
-
-              'HIGH',
-              '#f59e0b',
-
-              'MEDIUM',
-              '#38bdf8',
-
-              '#64748b'
-            ],
-
-            'circle-opacity': 0.18,
-
-            'circle-blur': 0.8
-          }
-        });
-
-
-        /*
-         * Main incident circles.
-         */
-        map.addLayer({
-          id: 'incident-points',
-
-          type: 'circle',
-
-          source: 'geoflux-incidents',
-
-          paint: {
-            'circle-radius': [
-              'interpolate',
-              ['linear'],
-              ['get', 'incident_count'],
-
-              0, 5,
-              25, 7,
-              100, 10,
-              500, 14
-            ],
-
-            'circle-color': [
-              'match',
-              ['get', 'latest_severity'],
-
-              'CRITICAL',
-              '#ef4444',
-
-              'HIGH',
-              '#f59e0b',
-
-              'MEDIUM',
-              '#38bdf8',
-
-              '#64748b'
-            ],
-
-            'circle-stroke-color':
-              '#f8fafc',
-
-            'circle-stroke-width':
-              1.5,
-
-            'circle-opacity':
-              0.95
-          }
-        });
-
-
-        /*
-         * City labels.
-         */
-        map.addLayer({
-          id: 'incident-labels',
-
-          type: 'symbol',
-
-          source: 'geoflux-incidents',
-
-          layout: {
-            'text-field':
-              ['get', 'city'],
-
-            'text-size':
-              11,
-
-            'text-offset':
-              [0, 1.6],
-
-            'text-anchor':
-              'top',
-
-            'text-allow-overlap':
-              false
-          },
-
-          paint: {
-            'text-color':
-              '#e2e8f0',
-
-            'text-halo-color':
-              '#020617',
-
-            'text-halo-width':
-              1.5
-          }
-        });
-
-
-        loadIncidents();
-
-
-        refreshTimer =
-          window.setInterval(
-            loadIncidents,
-            5000
-          );
-      });
-
-
-      /*
-       * Pointer feedback.
-       */
-      map.on(
-        'mouseenter',
-        'incident-points',
-        () => {
-          map.getCanvas().style.cursor =
-            'pointer';
-        }
-      );
-
-
-      map.on(
-        'mouseleave',
-        'incident-points',
-        () => {
-          map.getCanvas().style.cursor =
-            '';
-        }
-      );
-
-
-      /*
-       * Popup from GeoJSON properties.
-       */
-      map.on(
-        'click',
-        'incident-points',
-        (event: any) => {
-
-          const feature =
-            event.features?.[0];
-
-          if (!feature) {
-            return;
-          }
-
-          const p =
-            feature.properties;
-
-
-          new maplibregl.Popup({
-            offset: 16,
-
-            closeButton:
-              false
-          })
-
-            .setLngLat(
-              event.lngLat
-            )
-
-            .setHTML(`
-              <div class="geoflux-popup">
-
-                <div class="popup-city">
-                  ${p.city}
-                </div>
-
-                <div class="popup-country">
-                  ${p.country} · ${p.region}
-                </div>
-
-                <div class="popup-divider"></div>
-
-                <div class="popup-incident">
-                  ${p.latest_incident_type}
-                </div>
-
-                <div class="popup-grid">
-
-                  <span>Severity</span>
-                  <strong>
-                    ${p.latest_severity}
-                  </strong>
-
-                  <span>Total</span>
-                  <strong>
-                    ${p.incident_count}
-                  </strong>
-
-                  <span>Critical</span>
-                  <strong>
-                    ${p.critical_count}
-                  </strong>
-
-                  <span>High</span>
-                  <strong>
-                    ${p.high_count}
-                  </strong>
-
-                </div>
-
-              </div>
-            `)
-
-            .addTo(map);
-        }
-      );
-
-
-      map.on(
-        'error',
-        (event: any) => {
-
-          console.error(
-            'MapLibre error:',
-            event.error
-          );
-
-        }
-      );
-
-
       async function loadIncidents() {
         try {
-
-          const response =
-            await fetch(
-              'http://127.0.0.1:8000/api/incidents/map'
-            );
-
+          const response = await fetch(
+            'http://127.0.0.1:8000/api/incidents/map'
+          );
 
           if (!response.ok) {
-
             throw new Error(
-              `Map API returned ${response.status}`
+              `Map API returned HTTP ${response.status}`
             );
-
           }
-
 
           const incidents =
             await response.json();
 
+          console.log(
+            'MAP API RECORDS:',
+            incidents.length,
+            incidents
+          );
 
-          /*
-           * Convert FastAPI records to GeoJSON.
-           */
+
           const geojson = {
+            type: 'FeatureCollection',
 
-            type:
-              'FeatureCollection',
+            features: incidents.map(
+              (incident: any) => ({
+                type: 'Feature',
 
-            features:
-              incidents.map(
-                (incident: any) => ({
+                geometry: {
+                  type: 'Point',
 
-                  type:
-                    'Feature',
+                  coordinates: [
+                    Number(incident.longitude),
+                    Number(incident.latitude)
+                  ]
+                },
 
-                  geometry: {
-                    type:
-                      'Point',
+                properties: {
+                  city:
+                    incident.city,
 
-                    coordinates: [
-                      Number(
-                        incident.longitude
-                      ),
+                  country:
+                    incident.country,
 
-                      Number(
-                        incident.latitude
-                      )
-                    ]
-                  },
+                  region:
+                    incident.region,
 
-                  properties: {
-                    city:
-                      incident.city,
+                  incident_count:
+                    Number(
+                      incident.incident_count
+                    ),
 
-                    country:
-                      incident.country,
+                  critical_count:
+                    Number(
+                      incident.critical_count
+                    ),
 
-                    region:
-                      incident.region,
+                  high_count:
+                    Number(
+                      incident.high_count
+                    ),
 
-                    incident_count:
-                      Number(
-                        incident.incident_count
-                      ),
+                  latest_incident_type:
+                    incident.latest_incident_type,
 
-                    critical_count:
-                      Number(
-                        incident.critical_count
-                      ),
+                  latest_severity:
+                    incident.latest_severity,
 
-                    high_count:
-                      Number(
-                        incident.high_count
-                      ),
-
-                    latest_incident_type:
-                      incident.latest_incident_type,
-
-                    latest_severity:
-                      incident.latest_severity,
-
-                    latest_incident:
-                      incident.latest_incident
-                  }
-
-                })
-              )
+                  latest_incident:
+                    incident.latest_incident
+                }
+              })
+            )
           };
 
 
@@ -460,29 +151,257 @@
             );
 
 
-          if (source) {
-
-            source.setData(
-              geojson
-            );
-
+          if (!source) {
+            return geojson;
           }
+
+
+          source.setData(geojson);
+
+          console.log(
+            'GEOJSON SENT TO MAP:',
+            geojson.features.length,
+            geojson
+          );
 
 
           console.log(
             `GEOFlux map updated: ${incidents.length} cities`
           );
 
+          return geojson;
 
         } catch (error) {
-
           console.error(
             'GEOFlux incident map error:',
             error
           );
-
         }
       }
+
+
+      /*
+       * Everything involving the GeoJSON source
+       * happens only after MapLibre finishes loading.
+       */
+      map.once('load', async () => {
+        console.log(
+          'GEOFlux geographic basemap loaded'
+        );
+
+        map.addSource(
+          'geoflux-incidents',
+          {
+            type: 'geojson',
+            data: {
+              type: 'FeatureCollection',
+              features: []
+            }
+          }
+        );
+
+        /*
+         * Soft glow behind each point.
+         */
+        map.addLayer({
+          id: 'incident-glow',
+
+          type: 'circle',
+
+          source: 'geoflux-incidents',
+
+          paint: {
+            'circle-radius': 14,
+
+            'circle-color': [
+              'match',
+              ['get', 'latest_severity'],
+
+              'CRITICAL',
+              '#ef4444',
+
+              'HIGH',
+              '#f59e0b',
+
+              'MEDIUM',
+              '#38bdf8',
+
+              '#94a3b8'
+            ],
+
+            'circle-opacity': 0.25,
+
+            'circle-blur': 0.7
+          }
+        });
+
+
+        /*
+         * Main visible incident point.
+         */
+        map.addLayer({
+          id: 'incident-points',
+
+          type: 'circle',
+
+          source: 'geoflux-incidents',
+
+          paint: {
+            'circle-radius': 7,
+
+            'circle-color': [
+              'match',
+              ['get', 'latest_severity'],
+
+              'CRITICAL',
+              '#ef4444',
+
+              'HIGH',
+              '#f59e0b',
+
+              'MEDIUM',
+              '#38bdf8',
+
+              '#94a3b8'
+            ],
+
+            'circle-stroke-color':
+              '#ffffff',
+
+            'circle-stroke-width':
+              1.5,
+
+            'circle-opacity':
+              1
+          }
+        });
+
+        /*
+         * Hover cursor.
+         */
+        map.on(
+          'mouseenter',
+          'incident-points',
+          () => {
+            map.getCanvas().style.cursor =
+              'pointer';
+          }
+        );
+
+
+        map.on(
+          'mouseleave',
+          'incident-points',
+          () => {
+            map.getCanvas().style.cursor =
+              '';
+          }
+        );
+
+
+        /*
+         * Click popup.
+         */
+        map.on(
+          'click',
+          'incident-points',
+          (event: any) => {
+            const feature =
+              event.features?.[0];
+
+            if (!feature) {
+              return;
+            }
+
+            const p =
+              feature.properties;
+
+
+            new maplibregl.Popup({
+              offset: 16,
+              closeButton: false
+            })
+
+              .setLngLat(
+                event.lngLat
+              )
+
+              .setHTML(`
+                <div class="geoflux-popup">
+
+                  <div class="popup-city">
+                    ${p.city}
+                  </div>
+
+                  <div class="popup-country">
+                    ${p.country} · ${p.region}
+                  </div>
+
+                  <div class="popup-divider"></div>
+
+                  <div class="popup-incident">
+                    ${p.latest_incident_type}
+                  </div>
+
+                  <div class="popup-grid">
+
+                    <span>Severity</span>
+                    <strong>
+                      ${p.latest_severity}
+                    </strong>
+
+                    <span>Total</span>
+                    <strong>
+                      ${p.incident_count}
+                    </strong>
+
+                    <span>Critical</span>
+                    <strong>
+                      ${p.critical_count}
+                    </strong>
+
+                    <span>High</span>
+                    <strong>
+                      ${p.high_count}
+                    </strong>
+
+                  </div>
+
+                </div>
+              `)
+
+              .addTo(map);
+          }
+        );
+
+
+        /*
+         * Initial data load.
+         */
+        await loadIncidents();
+
+
+        /*
+         * Subsequent updates only replace GeoJSON data.
+         * The map itself is NOT recreated.
+         */
+        refreshTimer =
+          window.setInterval(
+            loadIncidents,
+            5000
+          );
+      });
+
+
+      map.on(
+        'error',
+        (event: any) => {
+          console.error(
+            'MapLibre error:',
+            event.error
+          );
+        }
+      );
     }
 
 
@@ -490,28 +409,20 @@
 
 
     /*
-     * Proper synchronous Svelte cleanup.
+     * Svelte cleanup.
      */
     return () => {
-
       destroyed = true;
 
-
       if (refreshTimer) {
-
         window.clearInterval(
           refreshTimer
         );
-
       }
-
 
       if (map) {
-
         map.remove();
-
       }
-
     };
   });
 </script>
@@ -530,17 +441,26 @@
   <div class="legend">
 
     <div>
-      <span class="legend-dot critical"></span>
+      <span
+        class="legend-dot critical"
+      ></span>
+
       Critical
     </div>
 
     <div>
-      <span class="legend-dot high"></span>
+      <span
+        class="legend-dot high"
+      ></span>
+
       High
     </div>
 
     <div>
-      <span class="legend-dot medium"></span>
+      <span
+        class="legend-dot medium"
+      ></span>
+
       Medium
     </div>
 
@@ -556,20 +476,18 @@
 
 
 <style>
-
   .map-wrapper {
     position: relative;
-
     width: 100%;
   }
 
 
   .map {
     width: 100%;
-
     height: 560px;
 
-    background: #080c12;
+    background:
+      #080c12;
   }
 
 
@@ -579,7 +497,6 @@
     z-index: 10;
 
     left: 16px;
-
     bottom: 16px;
 
     display: flex;
@@ -630,7 +547,6 @@
     display: block;
 
     width: 7px;
-
     height: 7px;
 
     border-radius: 50%;
@@ -664,8 +580,9 @@
   }
 
 
-  :global(.maplibregl-popup-content) {
-
+  :global(
+    .maplibregl-popup-content
+  ) {
     min-width:
       190px;
 
@@ -697,31 +614,31 @@
       Inter,
       system-ui,
       sans-serif;
-
   }
 
 
-  :global(.maplibregl-popup-tip) {
-
+  :global(
+    .maplibregl-popup-tip
+  ) {
     border-top-color:
       #0b1119 !important;
-
   }
 
 
-  :global(.popup-city) {
-
+  :global(
+    .popup-city
+  ) {
     font-size:
       15px;
 
     font-weight:
       600;
-
   }
 
 
-  :global(.popup-country) {
-
+  :global(
+    .popup-country
+  ) {
     margin-top:
       3px;
 
@@ -730,23 +647,23 @@
 
     font-size:
       11px;
-
   }
 
 
-  :global(.popup-divider) {
-
+  :global(
+    .popup-divider
+  ) {
     margin:
       10px 0;
 
     border-top:
       1px solid #263241;
-
   }
 
 
-  :global(.popup-incident) {
-
+  :global(
+    .popup-incident
+  ) {
     margin-bottom:
       10px;
 
@@ -758,12 +675,12 @@
 
     letter-spacing:
       0.04em;
-
   }
 
 
-  :global(.popup-grid) {
-
+  :global(
+    .popup-grid
+  ) {
     display: grid;
 
     grid-template-columns:
@@ -774,26 +691,24 @@
 
     font-size:
       11px;
-
   }
 
 
-  :global(.popup-grid span) {
-
+  :global(
+    .popup-grid span
+  ) {
     color:
       #64748b;
-
   }
 
 
-  :global(.popup-grid strong) {
-
+  :global(
+    .popup-grid strong
+  ) {
     font-weight:
       500;
 
     text-align:
       right;
-
   }
-
 </style>

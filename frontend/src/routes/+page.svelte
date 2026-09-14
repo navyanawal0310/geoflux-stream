@@ -1,7 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import IncidentMap from '$lib/components/IncidentMap.svelte';
-
+  import IncidentFeed from '$lib/components/IncidentFeed.svelte';
+  import IncidentAnalytics
+    from '$lib/components/IncidentAnalytics.svelte';
+  import PipelineHealth
+    from '$lib/components/PipelineHealth.svelte';
   type IncidentSummary = {
     total_incidents: number;
     affected_cities: number;
@@ -15,7 +19,9 @@
 
   async function loadSummary() {
     try {
-      loading = true;
+      if (!summary) {
+        loading = true;
+      }
       error = '';
 
       console.log('Requesting GEOFlux summary...');
@@ -94,13 +100,13 @@
   </header>
 
 
-  {#if loading}
+  {#if !summary && loading}
 
     <div class="message">
       Connecting to intelligence stream...
     </div>
 
-  {:else if error}
+  {:else if !summary && error}
 
     <div class="error">
       <strong>
@@ -190,7 +196,9 @@
     <div class="map-panel">
       <IncidentMap />
     </div>
-
+    <IncidentFeed />
+    <IncidentAnalytics />
+    <PipelineHealth />
   {/if}
 
 </main>
