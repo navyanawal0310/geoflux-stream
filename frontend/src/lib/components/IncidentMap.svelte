@@ -1,8 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  let mapContainer: HTMLDivElement;
+  let {
+    onCitySelect
+  }: {
+    onCitySelect?: (city: string) => void;
+  } = $props();
 
+  let mapContainer: HTMLDivElement;
   onMount(() => {
     let map: any = null;
     let refreshTimer: number | undefined;
@@ -315,7 +320,7 @@
 
             const p =
               feature.properties;
-
+            onCitySelect?.(p.city);
 
             new maplibregl.Popup({
               offset: 16,

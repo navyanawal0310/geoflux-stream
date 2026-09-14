@@ -6,6 +6,11 @@
     from '$lib/components/IncidentAnalytics.svelte';
   import PipelineHealth
     from '$lib/components/PipelineHealth.svelte';
+  import StreamMetrics
+  from '$lib/components/StreamMetrics.svelte';
+  import CityDetail
+    from '$lib/components/CityDetail.svelte';
+
   type IncidentSummary = {
     total_incidents: number;
     affected_cities: number;
@@ -16,6 +21,8 @@
   let summary = $state<IncidentSummary | null>(null);
   let loading = $state(true);
   let error = $state('');
+  let selectedCity =
+    $state<string | null>(null);
 
   async function loadSummary() {
     try {
@@ -194,11 +201,26 @@
 
 
     <div class="map-panel">
-      <IncidentMap />
+      <IncidentMap
+        onCitySelect={(city) => {
+          selectedCity = city;
+        }}
+      />
     </div>
     <IncidentFeed />
     <IncidentAnalytics />
     <PipelineHealth />
+    <StreamMetrics />
+  {/if}
+  {#if selectedCity}
+
+    <CityDetail
+      city={selectedCity}
+      onClose={() => {
+        selectedCity = null;
+      }}
+    />
+
   {/if}
 
 </main>

@@ -3,8 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import socket
 from database import query
-
-
+from confluent_kafka import Consumer, TopicPartition
 app = FastAPI(
     title="GEOFlux Intelligence API",
     version="0.1.0",
@@ -297,3 +296,213 @@ def system_health():
 
 
     return services
+@app.get("/api/system/throughput")
+def system_throughput():
+
+    rows = query(
+        """
+        SELECT
+            toStartOfSecond(detected_at) AS timestamp,
+            count() AS events
+        FROM incidents
+        WHERE detected_at >= now() - INTERVAL 60 SECOND
+        GROUP BY timestamp
+        ORDER BY timestamp
+        """
+    )
+
+    total = sum(
+        row["events"]
+        for row in rows
+    )
+
+    return {
+        "events_last_60_seconds": total,
+        "events_per_second": round(total / 60, 2),
+        "timeline": rows
+    }
+
+@app.get("/api/system/kafka-lag")
+def kafka_lag():
+
+    topic = "sensor.raw"
+
+    groups = [
+        "geoflux-flink-alert-engine",
+        "geoflux-window-engine",
+    ]
+
+    results = []
+
+    for group_id in groups:
+
+        consumer = Consumer(
+            {
+                "bootstrap.servers": "localhost:9092",
+                "group.id": group_id,
+                "enable.auto.commit": False,
+                "session.timeout.ms": 6000,
+            }
+        )
+
+        try:
+            metadata = consumer.list_topics(
+                topic=topic,
+                timeout=5
+            )
+
+            topic_metadata = (
+                metadata.topics.get(topic)
+            )
+
+            if topic_metadata is None:
+                raise RuntimeError(
+                    f"Topic {topic} not found"
+                )
+
+            partitions = [
+                TopicPartition(
+                    topic,
+                    partition_id
+                )
+                for partition_id
+                in topic_metadata.partitions.keys()
+            ]
+
+
+            committed = consumer.committed(
+                    partitions,
+                    timeout=5
+                )
+
+
+            total_lag = 0
+
+            partition_metrics = []
+
+
+            for tp in committed:
+
+                low, high = (
+                    consumer
+                    .get_watermark_offsets(
+                        TopicPartition(
+                            topic,
+                            tp.partition
+                        ),
+                        timeout=5
+                    )
+                )
+
+
+                committed_offset = (
+                    tp.offset
+                    if tp.offset >= 0
+                    else None
+                )
+
+
+                if committed_offset is None:
+                    lag = None
+
+                else:
+                    lag = max(
+                        high -
+                        committed_offset,
+                        0
+                    )
+
+                    total_lag += lag
+
+
+                partition_metrics.append(
+                    {
+                        "partition":
+                            tp.partition,
+
+                        "committed_offset":
+                            committed_offset,
+
+                        "latest_offset":
+                            high,
+
+                        "lag":
+                            lag,
+                    }
+                )
+
+
+            results.append(
+                {
+                    "group_id":
+                        group_id,
+
+                    "topic":
+                        topic,
+
+                    "total_lag":
+                        total_lag,
+
+                    "partitions":
+                        partition_metrics,
+                }
+            )
+
+
+        except Exception as exc:
+
+            results.append(
+                {
+                    "group_id":
+                        group_id,
+
+                    "topic":
+                        topic,
+
+                    "status":
+                        "ERROR",
+
+                    "error":
+                        str(exc),
+                }
+            )
+
+
+        finally:
+            consumer.close()
+
+
+    return {
+        "topic": topic,
+        "consumer_groups": results
+    }
+@app.get("/api/incidents/city/{city}")
+def incidents_for_city(city: str):
+
+    safe_city = city.replace("'", "''")
+
+    incidents = query(
+        f"""
+        SELECT
+            incident_type,
+            city,
+            sensor_type,
+            severity,
+            event_count,
+            max_value,
+            min_value,
+            average_value,
+            window_start,
+            window_end,
+            detected_at
+        FROM incidents
+        WHERE city = '{safe_city}'
+        ORDER BY detected_at DESC
+        LIMIT 50
+        """
+    )
+
+    return {
+        "city": city,
+        "incidents": incidents
+    }
