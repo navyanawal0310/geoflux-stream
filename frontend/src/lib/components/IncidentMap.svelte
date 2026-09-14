@@ -1,0 +1,799 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+
+  let mapContainer: HTMLDivElement;
+
+  onMount(() => {
+    let map: any;
+    let refreshTimer: number | undefined;
+    let destroyed = false;
+
+    async function startMap() {
+      const maplibregl = await import('maplibre-gl');
+
+      if (destroyed) return;
+
+      map = new maplibregl.Map({
+        container: mapContainer,
+
+        /*
+         * No external style JSON.
+         * No CARTO key.
+         *
+         * We use standard OpenStreetMap raster tiles
+         * directly as a MapLibre source.
+         */
+        style: {
+          version: 8,
+
+          sources: {
+            osm: {
+              type: 'raster',
+
+              tiles: [
+                'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+              ],
+
+              tileSize: 256,
+
+              attribution:
+                '© OpenStreetMap contributors'
+            }
+          },
+
+          layers: [
+            {
+              id: 'osm-basemap',
+              type: 'raster',
+              source: 'osm',
+
+              /*
+               * Slightly suppress the basemap so
+               * incident intelligence dominates.
+               */
+              paint: {
+                'raster-saturation': -0.65,
+                'raster-contrast': 0.15,
+                'raster-brightness-max': 0.72
+              }
+            }
+          ]
+        },
+
+        center: [20, 18],
+
+        zoom: 1.35,
+
+        minZoom: 1,
+
+        attributionControl: true
+      });
+
+
+      map.addControl(
+        new maplibregl.NavigationControl({
+          showCompass: false
+        }),
+        'top-right'
+      );
+
+
+      map.on('load', () => {
+        console.log(
+          'GEOFlux geographic basemap loaded'
+        );
+
+
+        /*
+         * One GeoJSON source represents every
+         * active city.
+         */
+        map.addSource(
+          'geoflux-incidents',
+          {
+            type: 'geojson',
+
+            data: {
+              type: 'FeatureCollection',
+              features: []
+            }
+          }
+        );
+
+
+        /*
+         * Outer glow.
+         */
+        map.addLayer({
+          id: 'incident-glow',
+
+          type: 'circle',
+
+          source: 'geoflux-incidents',
+
+          paint: {
+            'circle-radius': [
+              'interpolate',
+              ['linear'],
+              ['get', 'incident_count'],
+
+              0, 9,
+              25, 13,
+              100, 19,
+              500, 27
+            ],
+
+            'circle-color': [
+              'match',
+              ['get', 'latest_severity'],
+
+              'CRITICAL',
+              '#ef4444',
+
+              'HIGH',
+              '#f59e0b',
+
+              'MEDIUM',
+              '#38bdf8',
+
+              '#64748b'
+            ],
+
+            'circle-opacity': 0.18,
+
+            'circle-blur': 0.8
+          }
+        });
+
+
+        /*
+         * Main incident circles.
+         */
+        map.addLayer({
+          id: 'incident-points',
+
+          type: 'circle',
+
+          source: 'geoflux-incidents',
+
+          paint: {
+            'circle-radius': [
+              'interpolate',
+              ['linear'],
+              ['get', 'incident_count'],
+
+              0, 5,
+              25, 7,
+              100, 10,
+              500, 14
+            ],
+
+            'circle-color': [
+              'match',
+              ['get', 'latest_severity'],
+
+              'CRITICAL',
+              '#ef4444',
+
+              'HIGH',
+              '#f59e0b',
+
+              'MEDIUM',
+              '#38bdf8',
+
+              '#64748b'
+            ],
+
+            'circle-stroke-color':
+              '#f8fafc',
+
+            'circle-stroke-width':
+              1.5,
+
+            'circle-opacity':
+              0.95
+          }
+        });
+
+
+        /*
+         * City labels.
+         */
+        map.addLayer({
+          id: 'incident-labels',
+
+          type: 'symbol',
+
+          source: 'geoflux-incidents',
+
+          layout: {
+            'text-field':
+              ['get', 'city'],
+
+            'text-size':
+              11,
+
+            'text-offset':
+              [0, 1.6],
+
+            'text-anchor':
+              'top',
+
+            'text-allow-overlap':
+              false
+          },
+
+          paint: {
+            'text-color':
+              '#e2e8f0',
+
+            'text-halo-color':
+              '#020617',
+
+            'text-halo-width':
+              1.5
+          }
+        });
+
+
+        loadIncidents();
+
+
+        refreshTimer =
+          window.setInterval(
+            loadIncidents,
+            5000
+          );
+      });
+
+
+      /*
+       * Pointer feedback.
+       */
+      map.on(
+        'mouseenter',
+        'incident-points',
+        () => {
+          map.getCanvas().style.cursor =
+            'pointer';
+        }
+      );
+
+
+      map.on(
+        'mouseleave',
+        'incident-points',
+        () => {
+          map.getCanvas().style.cursor =
+            '';
+        }
+      );
+
+
+      /*
+       * Popup from GeoJSON properties.
+       */
+      map.on(
+        'click',
+        'incident-points',
+        (event: any) => {
+
+          const feature =
+            event.features?.[0];
+
+          if (!feature) {
+            return;
+          }
+
+          const p =
+            feature.properties;
+
+
+          new maplibregl.Popup({
+            offset: 16,
+
+            closeButton:
+              false
+          })
+
+            .setLngLat(
+              event.lngLat
+            )
+
+            .setHTML(`
+              <div class="geoflux-popup">
+
+                <div class="popup-city">
+                  ${p.city}
+                </div>
+
+                <div class="popup-country">
+                  ${p.country} · ${p.region}
+                </div>
+
+                <div class="popup-divider"></div>
+
+                <div class="popup-incident">
+                  ${p.latest_incident_type}
+                </div>
+
+                <div class="popup-grid">
+
+                  <span>Severity</span>
+                  <strong>
+                    ${p.latest_severity}
+                  </strong>
+
+                  <span>Total</span>
+                  <strong>
+                    ${p.incident_count}
+                  </strong>
+
+                  <span>Critical</span>
+                  <strong>
+                    ${p.critical_count}
+                  </strong>
+
+                  <span>High</span>
+                  <strong>
+                    ${p.high_count}
+                  </strong>
+
+                </div>
+
+              </div>
+            `)
+
+            .addTo(map);
+        }
+      );
+
+
+      map.on(
+        'error',
+        (event: any) => {
+
+          console.error(
+            'MapLibre error:',
+            event.error
+          );
+
+        }
+      );
+
+
+      async function loadIncidents() {
+        try {
+
+          const response =
+            await fetch(
+              'http://127.0.0.1:8000/api/incidents/map'
+            );
+
+
+          if (!response.ok) {
+
+            throw new Error(
+              `Map API returned ${response.status}`
+            );
+
+          }
+
+
+          const incidents =
+            await response.json();
+
+
+          /*
+           * Convert FastAPI records to GeoJSON.
+           */
+          const geojson = {
+
+            type:
+              'FeatureCollection',
+
+            features:
+              incidents.map(
+                (incident: any) => ({
+
+                  type:
+                    'Feature',
+
+                  geometry: {
+                    type:
+                      'Point',
+
+                    coordinates: [
+                      Number(
+                        incident.longitude
+                      ),
+
+                      Number(
+                        incident.latitude
+                      )
+                    ]
+                  },
+
+                  properties: {
+                    city:
+                      incident.city,
+
+                    country:
+                      incident.country,
+
+                    region:
+                      incident.region,
+
+                    incident_count:
+                      Number(
+                        incident.incident_count
+                      ),
+
+                    critical_count:
+                      Number(
+                        incident.critical_count
+                      ),
+
+                    high_count:
+                      Number(
+                        incident.high_count
+                      ),
+
+                    latest_incident_type:
+                      incident.latest_incident_type,
+
+                    latest_severity:
+                      incident.latest_severity,
+
+                    latest_incident:
+                      incident.latest_incident
+                  }
+
+                })
+              )
+          };
+
+
+          const source =
+            map.getSource(
+              'geoflux-incidents'
+            );
+
+
+          if (source) {
+
+            source.setData(
+              geojson
+            );
+
+          }
+
+
+          console.log(
+            `GEOFlux map updated: ${incidents.length} cities`
+          );
+
+
+        } catch (error) {
+
+          console.error(
+            'GEOFlux incident map error:',
+            error
+          );
+
+        }
+      }
+    }
+
+
+    startMap();
+
+
+    /*
+     * Proper synchronous Svelte cleanup.
+     */
+    return () => {
+
+      destroyed = true;
+
+
+      if (refreshTimer) {
+
+        window.clearInterval(
+          refreshTimer
+        );
+
+      }
+
+
+      if (map) {
+
+        map.remove();
+
+      }
+
+    };
+  });
+</script>
+
+
+<svelte:head>
+  <link
+    href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css"
+    rel="stylesheet"
+  />
+</svelte:head>
+
+
+<div class="map-wrapper">
+
+  <div class="legend">
+
+    <div>
+      <span class="legend-dot critical"></span>
+      Critical
+    </div>
+
+    <div>
+      <span class="legend-dot high"></span>
+      High
+    </div>
+
+    <div>
+      <span class="legend-dot medium"></span>
+      Medium
+    </div>
+
+  </div>
+
+
+  <div
+    bind:this={mapContainer}
+    class="map"
+  ></div>
+
+</div>
+
+
+<style>
+
+  .map-wrapper {
+    position: relative;
+
+    width: 100%;
+  }
+
+
+  .map {
+    width: 100%;
+
+    height: 560px;
+
+    background: #080c12;
+  }
+
+
+  .legend {
+    position: absolute;
+
+    z-index: 10;
+
+    left: 16px;
+
+    bottom: 16px;
+
+    display: flex;
+
+    gap: 16px;
+
+    padding:
+      9px 12px;
+
+    background:
+      rgba(
+        8,
+        12,
+        18,
+        0.88
+      );
+
+    border:
+      1px solid #263241;
+
+    backdrop-filter:
+      blur(8px);
+
+    font-size:
+      10px;
+
+    letter-spacing:
+      0.08em;
+
+    text-transform:
+      uppercase;
+
+    color:
+      #94a3b8;
+  }
+
+
+  .legend > div {
+    display: flex;
+
+    align-items: center;
+
+    gap: 6px;
+  }
+
+
+  .legend-dot {
+    display: block;
+
+    width: 7px;
+
+    height: 7px;
+
+    border-radius: 50%;
+  }
+
+
+  .legend-dot.critical {
+    background:
+      #ef4444;
+
+    box-shadow:
+      0 0 8px #ef4444;
+  }
+
+
+  .legend-dot.high {
+    background:
+      #f59e0b;
+
+    box-shadow:
+      0 0 8px #f59e0b;
+  }
+
+
+  .legend-dot.medium {
+    background:
+      #38bdf8;
+
+    box-shadow:
+      0 0 8px #38bdf8;
+  }
+
+
+  :global(.maplibregl-popup-content) {
+
+    min-width:
+      190px;
+
+    padding:
+      14px;
+
+    background:
+      #0b1119;
+
+    color:
+      #e8edf5;
+
+    border:
+      1px solid #334155;
+
+    border-radius:
+      3px;
+
+    box-shadow:
+      0 8px 30px
+      rgba(
+        0,
+        0,
+        0,
+        0.45
+      );
+
+    font-family:
+      Inter,
+      system-ui,
+      sans-serif;
+
+  }
+
+
+  :global(.maplibregl-popup-tip) {
+
+    border-top-color:
+      #0b1119 !important;
+
+  }
+
+
+  :global(.popup-city) {
+
+    font-size:
+      15px;
+
+    font-weight:
+      600;
+
+  }
+
+
+  :global(.popup-country) {
+
+    margin-top:
+      3px;
+
+    color:
+      #64748b;
+
+    font-size:
+      11px;
+
+  }
+
+
+  :global(.popup-divider) {
+
+    margin:
+      10px 0;
+
+    border-top:
+      1px solid #263241;
+
+  }
+
+
+  :global(.popup-incident) {
+
+    margin-bottom:
+      10px;
+
+    color:
+      #cbd5e1;
+
+    font-size:
+      11px;
+
+    letter-spacing:
+      0.04em;
+
+  }
+
+
+  :global(.popup-grid) {
+
+    display: grid;
+
+    grid-template-columns:
+      1fr auto;
+
+    gap:
+      6px 16px;
+
+    font-size:
+      11px;
+
+  }
+
+
+  :global(.popup-grid span) {
+
+    color:
+      #64748b;
+
+  }
+
+
+  :global(.popup-grid strong) {
+
+    font-weight:
+      500;
+
+    text-align:
+      right;
+
+  }
+
+</style>

@@ -118,3 +118,92 @@ def incident_timeline():
         ORDER BY timestamp
         """
     )
+
+@app.get("/api/incidents/map")
+def incident_map():
+
+    return query(
+        """
+        SELECT
+            i.city,
+            d.country,
+            d.region,
+            d.latitude,
+            d.longitude,
+
+            count() AS incident_count,
+
+            countIf(
+                i.severity = 'CRITICAL'
+            ) AS critical_count,
+
+            countIf(
+                i.severity = 'HIGH'
+            ) AS high_count,
+
+            max(i.detected_at) AS latest_incident,
+
+            argMax(
+                i.incident_type,
+                i.detected_at
+            ) AS latest_incident_type,
+
+            argMax(
+                i.severity,
+                i.detected_at
+            ) AS latest_severity
+
+        FROM incidents AS i
+
+        INNER JOIN city_dimension AS d
+            ON i.city = d.city
+
+        WHERE
+            i.detected_at >=
+            now() - INTERVAL 60 MINUTE
+
+        GROUP BY
+            i.city,
+            d.country,
+            d.region,
+            d.latitude,
+            d.longitude
+
+        ORDER BY incident_count DESC
+        """
+    )
+@app.get("/api/incidents/live")
+def live_incidents():
+
+    return query(
+        """
+        SELECT
+            i.incident_type,
+            i.city,
+            d.country,
+            d.region,
+            d.latitude,
+            d.longitude,
+
+            i.sensor_type,
+            i.severity,
+
+            i.event_count,
+            i.max_value,
+            i.min_value,
+            i.average_value,
+
+            i.window_start,
+            i.window_end,
+            i.detected_at
+
+        FROM incidents AS i
+
+        INNER JOIN city_dimension AS d
+            ON i.city = d.city
+
+        ORDER BY i.detected_at DESC
+
+        LIMIT 100
+        """
+    )
