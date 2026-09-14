@@ -282,37 +282,44 @@
         });
 
         /*
-         * Hover cursor.
+         * Map interaction.
+         * We query a small screen-space box around the cursor instead of
+         * adding an invisible circle layer above the visible incident dots.
+         * This preserves the original rendering while making points easier
+         * to hover and click.
          */
-        map.on(
-          'mouseenter',
-          'incident-points',
-          () => {
-            map.getCanvas().style.cursor =
-              'pointer';
-          }
-        );
+        const findIncidentNearPoint = (point: any) => {
+          const padding = 12;
+
+          const box = [
+            [point.x - padding, point.y - padding],
+            [point.x + padding, point.y + padding]
+          ];
+
+          return map.queryRenderedFeatures(
+            box,
+            { layers: ['incident-points'] }
+          )?.[0];
+        };
 
 
         map.on(
-          'mouseleave',
-          'incident-points',
-          () => {
-            map.getCanvas().style.cursor =
-              '';
-          }
-        );
-
-
-        /*
-         * Click popup.
-         */
-        map.on(
-          'click',
-          'incident-points',
+          'mousemove',
           (event: any) => {
             const feature =
-              event.features?.[0];
+              findIncidentNearPoint(event.point);
+
+            map.getCanvas().style.cursor =
+              feature ? 'pointer' : '';
+          }
+        );
+
+
+        map.on(
+          'click',
+          (event: any) => {
+            const feature =
+              findIncidentNearPoint(event.point);
 
             if (!feature) {
               return;
@@ -320,17 +327,25 @@
 
             const p =
               feature.properties;
-            onCitySelect?.(p.city);
+
+            console.log(
+              'CITY SELECTED:',
+              p?.city
+            );
+
+            if (p?.city) {
+              onCitySelect?.(
+                String(p.city)
+              );
+            }
 
             new maplibregl.Popup({
               offset: 16,
               closeButton: false
             })
-
               .setLngLat(
                 event.lngLat
               )
-
               .setHTML(`
                 <div class="geoflux-popup">
 
@@ -374,7 +389,6 @@
 
                 </div>
               `)
-
               .addTo(map);
           }
         );
