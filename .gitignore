@@ -21,3 +21,17 @@ Thumbs.db
 
 # Runtime data
 data/
+
+# Node / Svelte
+node_modules/
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/dist/
+
+# Vite
+.vite/
+
+# Test / cache
+.pytest_cache/
+.coverage
